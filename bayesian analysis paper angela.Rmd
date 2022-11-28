@@ -1,0 +1,227 @@
+---
+title: "Bayesian analysis paper"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+---
+
+>Angela Jiang-Wang
+
+```{r include=FALSE}
+library(rstanarm)
+library(knitr)
+library(tidyverse)
+library(bayesplot)
+library(bayestestR)
+```
+
+
+
+## Introduction and data description
+
+In this paper I will use original experimental data that I collected during August 2021. The experiment was programmed with Qualtrics and the participants were recruited through the online platform Prolific. 
+
+### The experiment
+
+I conducted an online incentivized lying experiment based on the die-rolling game developed by Fischbacher and Föllmi-Heusi (2013). In this experiment, participants could lie and obtain monetary rewards at the expense of the researchers.
+
+Participants first read instructions that stated that they would roll a virtual six-sided-die and that they had to report the first outcome they saw. They could roll the die as many times as they wanted to check that the die was truly random and unbiased, however they should only report the first outcome to the experimenters.
+
+After reading the instructions, participants received a link to [random.org](https://www.random.org/dice/?num=1) where they were able to roll the virtual die and see the outcome. There was no way for the experimenters to know which was the die roll outcome of the participants and, thus, to know whether they were reporting a true outcome or a false one.
+
+All subjects received a participation fee of £0.25 and could additionally earn a bonus payment according to the die roll outcome they reported. The bonus payment was determined as it is shown in the table below (this same table was shown to the participants in the instructions):
+
+```{r echo=FALSE, fig.align='center', fig.cap='...', out.width='50%'}
+knitr::include_graphics('payment.png')
+```
+
+Participants were divided into a control group and three additional treatment groups, thus there were four experimental conditions in total. **In this paper, I will only consider two cells: control and treatment 1.**
+
+In the **control group**, participants directly reported the outcome after they saw the die roll. In the **treatment group**, participants had to answer the question below before they could report the die roll outcome.
+
+```{r echo=FALSE, fig.align='center', fig.cap='...', out.width='50%'}
+knitr::include_graphics('treatment.png')
+```
+
+In this paper I will examine **two predictor variables: gender and treatment**
+
+
+#### Gender
+
+Past studies have declared that females tend to lie less and males (e.g., Dreber and Johannesson, 2008). For this paper, **I will use as an informative prior the findings of a meta-analysis** of 90 experimental studies that implemented the Fischbacher and Föllmi-Heusi (2013) method. In this meta-analysis, **women’s standardized report was on average 0.057 lower than men’s with a standard error of 0.009 across 22,172 subjects** (thus, a standard deviation of 1.34). This effect was found to be highly significant (Abeler, Nosenzo and Raymond, 2019, Appendix A.3). 
+
+#### Treatment
+
+The reasoning behind this treatment design is that, although the individual would be free to answer however they desire, I predict that social desirability bias (Grimm, 2010) would lead the majority to respond in accordance to their internalized social values. Nonetheless, if the individual is given the freedom to answer to the question as they wish, they should not be able to justify their answer as other than it being their true belief. 
+
+If individuals generally have a positive and honest image of themselves (Mazar, Amir and Ariely, 2008), and they state that they consider cheating to be unethical, cognitive dissonance (Festinger, 1962) will motivate participants to stay consistent and act more committed towards their elicited beliefs.
+
+**As I do not know which may be the effect of the treatment, I will use a weakly informative prior in the model (that is, a default prior)**
+
+### Hypotheses
+
+1. **H1**: Gender will have a significant effect towards the outcome reported: females will report in average lower outcomes 
+
+2. **H2**: Treatment will have a significant effect towards the outcome reported: participants in the treatment group will report in average lower outcomes than participants in the control group
+
+3. **Exploratory**: I will explore if there are, additionally, any interaction effects between gender and treatment
+
+### Data description
+
+I will open the clean dataset now. In this dataset, participants who did not pass the screeners (a question about consent to participate in the study and an attention check question) were filtered out. 
+
+```{r}
+d1<-read.csv("dierollfinal.csv")
+```
+
+I will create a new dataset d2 with only the relevant columns I will use for the analysis, and with only the two groups I will be studying (control and treatment 1)
+
+```{r}
+#load tidyverse
+d2<-select(d1, dienumb, gender, age, Condition, bonus)
+d2<- d2[which(d2$Condition == "question" | d2$Condition == "control"), ]
+d2$female = ifelse (d2$gender == "Female",1, 0)
+d2$treatment = ifelse (d2$Condition == "question",1, 0)
+head(d2)
+```
+
+The data has now 5 variables and 148 observations
+
+```{r}
+dim(d2)
+```
+
+56% of the participants are female and the mean age is 24 years old.
+
+```{r}
+nrow(d2[which(d2$gender == "Female"),])/nrow(d2)*100
+mean(d2$age)
+```
+
+
+## The models
+
+### Data preparation: standardization of the outcome variable "dienumb"
+
+In order to use the informative prior obtained from Abeler et al. 2019 -which was reported in standardized form- I will standardize the outcome variable "dienumb". Standardization of the outcome variable is also helpful for comparison with other studies that use a different scale.
+
+```{r}
+d2$dienumbst <- scale(d2$dienumb)
+mean(d2$dienumbst)
+sd(d2$dienumbst)
+```
+
+I will plot the histograms of dienumb and dienumbst to check that they maintain the same distribution
+
+```{r}
+par(mfrow=c(1,2))
+hist(d2$dienumb)
+hist(d2$dienumbst)
+```
+
+### Frequentist model
+
+I will first run a frequentist linear model to check the coefficients and p-values and compare the results with the bayesian model
+
+```{r}
+model_freq <- lm(dienumbst ~ female*treatment, data=d2)
+summary(model_freq)
+```
+
+
+As I can see from the model summary, none of the coefficients are significant according to a classical p-value threshold of 0.05. 
+
+
+### Bayesian model
+
+I will now implement a bayesian linear regression model with "dienumb" (die roll outcome) as the outcome variable and "female" and "treatment" as predictors. For **female**, I will use **mean=0.057 and sd=1.34 as informative priors**. For **treatment**, I will use the **default prior** that the package rstanarm includes, which is a weakly informative prior of normal(0, 2.5). As I do not have any information of the **interaction effect** of female and treatment, I will also use a **default prior** for the interaction effect, that is, a weakly informative prior of normal(0, 2.5)
+
+I will leave the rest of the parameters as defaults.
+
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE, results= 'hide'}
+#load rstanarm
+#I set seed = 100 for reproducibility
+
+model<-stan_glm(dienumbst ~ female + treatment + female:treatment, data=d2,
+prior=normal(location = c(-0.057, 0, 0), scale = c(1.34, 2.5, 2.5)), seed=100)
+```
+
+```{r}
+print(model)
+
+```
+
+
+The variable "female" has a median estimate of -0.3 and "treatment" has a median estimate of -0.2 from the MCMC simulation. They both have a median absolute deviation of 0.2, which is quite high in comparison to the median estimates. Interestingly, the interaction between gender and treatment has a positive median estimate of 0.3, with a median deviation of 0.3.
+
+The coefficients obtained from the bayesian linear model are almost identical to the coefficients from the frequentist linear model.
+
+**The coefficients suggest, in principle, that females and participants that were exposed to the treatment may report lower die roll outcomes in general, however, females that were exposed to the treatment may report higher die roll outcomes.**
+
+However, in order to make a claim I will need to evaluate the model parameters by checking the credible intervals and the ROPE.
+
+Now, I will plot the MCMC simulation of each predictor using bayesplot
+
+```{r}
+#load bayesplot
+
+mcmc_dens(model, pars = c("female"))+
+  vline_at(-0.3, col="red")
+mcmc_dens(model, pars = c("treatment"))+
+  vline_at(-0.2, col="red")
+mcmc_dens(model, pars = c("female:treatment"))+
+  vline_at(0.3, col="red")
+
+
+```
+
+
+
+From the plots, I can conclude that the point estimates of each predictor fall in the median of their MCMC simulation distribution.
+
+
+## Evaluating the bayesian model coefficients
+
+I will evaluate the coefficients of the model by examining whether the corresponding credible intervals pass through zero. I will do this with the package bayestestR. 
+
+By default, the credible interval is computed using the **highest density interval method.**
+
+
+```{r}
+#load bayestestR
+describe_posterior(model)
+```
+
+
+Given the data and the priors used, there is 95% of probability that the coefficients of the predictors lie within the CI shown in the table (that is, above CI_low and below CI_high), and **all three credible intervals pass through zero.**
+
+Another way of evaluating the coefficients is by examining the **Region of Practical Equivalence (ROPE)**, that is, the range where the effect is equivalent to zero, defined by default as [-0.10, 0.10]. For "Female", approximately 14% of its credible interval falls within the ROPE. For "Treatment" it is 24% and for the interaction it is 18%.
+
+In order to reject a "null hypothesis", the % within the ROPE should be as close to zero as possible. **These % are far from zero.**
+
+
+## Conclusion
+
+After examining the credible intervals of each coefficient as well as the % of them that falls within the ROPE, **both the frequentist linear model and the bayesian linear model lead me to the same conclusion: the null hypothesis cannot be rejected for any of the two predictors nor for the interaction given the current data and priors.**
+
+That is to say, **H1 and H2 are rejected**: I cannot establish any significant influence from gender and treatment to the die roll outcome reported. That is, neither gender nor exposure to the treatment make participants report lower die roll outcomes. I have not found any interaction effect from these two predictors either.
+
+
+## References
+
+1. Abeler, J., D. Nosenzo, and C. Raymond. (2019) ‘Preferences for Truth-Telling’, Econometrica, 87(4), pp. 1115–1153.
+
+2. Dreber, A. and Johannesson, M. (2008), ‘Gender differences in deception’, Economics Letters, 99 (1), pp. 197–99.
+
+3. Festinger, L. (1962) ‘Cognitive Dissonance’, Scientific American, 207(4), pp. 93–106.
+
+4. Fischbacher, U. and Föllmi-Heusi, F. (2013) ‘Lies in Disguise—An Experimental Study on Cheating’, Journal of the European Economic Association, 11(3), pp. 525–547. doi: 10.1111/jeea.12014.
+
+5. Grimm, P. (2010) ‘Social Desirability Bias’, in Wiley International Encyclopedia of Marketing. Chichester, UK: John Wiley & Sons, Ltd. doi: 10.1002/9781444316568.wiem02057.
+
+6. Mazar, N., Amir, O. and Ariely, D. (2008) ‘The Dishonesty of Honest People: A Theory of Self-Concept Maintenance’, Journal of Marketing Research, 45(6), pp. 633–644. doi: 10.1509/jmkr.45.6.633.
+
+
